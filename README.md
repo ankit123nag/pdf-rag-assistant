@@ -3,6 +3,8 @@ A full-stack application that allows authenticated users to upload PDF documents
 
 This project focuses on clean system design, asynchronous processing, and secure integration between frontend, backend, and AI workflows.
 
+The document ingestion pipeline is fully implemented and operational; query and UI layers are under active development.
+
 ## Features
 - User authentication using Clerk
 - Secure PDF upload
@@ -29,7 +31,9 @@ This project focuses on clean system design, asynchronous processing, and secure
 
 ### AI / RAG
 - LangChain
-- PDF parsing and text splitting
+- PDF parsing and recursive text chunking
+- Hugging Face Inference embeddings
+- Vector storage using Pinecone
 
 ## Architecture Overview
 ```scss
@@ -39,7 +43,7 @@ Express API (Auth, Upload, Queue)
    ↓
 Valkey Queue
    ↓
-Worker (PDF parsing, chunking, embeddings)
+Worker (PDF parsing, chunking, embedding generation, vector storage)
 ```
 Authentication is handled at the API boundary, while document ingestion and processing are performed asynchronously by background workers.
 
@@ -65,7 +69,8 @@ This will:
 
 ## Project Status
 - Authentication & uploads: ✅
-- PDF ingestion pipeline: ✅
+- PDF ingestion pipeline (queue + worker + embeddings): ✅
+- Vector storage (Pinecone): ✅
 - RAG query endpoint: 🚧 In progress
 - UI for querying documents: 🚧 In progress
 
@@ -73,3 +78,4 @@ This will:
 - Background processing is decoupled from the API using a queue-based architecture
 - Authentication is handled using Clerk modals on the frontend
 - The project is designed to demonstrate real-world, scalable application patterns
+- Document embeddings are generated asynchronously and stored in a vector database
