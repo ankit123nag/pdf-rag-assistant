@@ -1,6 +1,10 @@
 {
   "name": "pdf-rag-assistant",
   "private": true,
+  "workspaces": [
+    "client/web",
+    "server"
+  ],
   "scripts": {
     "dev": "node scripts/dev.js"
   }

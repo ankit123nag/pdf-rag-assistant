@@ -1,5 +1,5 @@
 {
-  "name": "pdf-rag-assistant",
+  "name": "server",
   "version": "1.0.0",
   "description": "RAG Application using JavaScript",
   "license": "ISC",

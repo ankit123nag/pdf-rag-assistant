@@ -58,6 +58,7 @@ Create environment files using the provided .env.example templates in the respec
 ## Running the Application
 From the project root, run:
 ```bash
+npm install
 npm run dev
 ```
 
