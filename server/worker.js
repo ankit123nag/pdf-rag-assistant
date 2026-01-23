@@ -1,66 +1,49 @@
 import "dotenv/config";
-import { Worker } from 'bullmq';
-import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
-import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
-// import { OpenAIEmbeddings } from "@langchain/openai";
-import { PineconeStore } from '@langchain/pinecone';
-import { Pinecone } from '@pinecone-database/pinecone';
-import { HuggingFaceInferenceEmbeddings } from "@langchain/community/embeddings/hf";
+import { Worker } from "bullmq";
+import { detectDocumentType } from "./utils/detectDocumentType.js";
+import { processDocumentIngestion } from "./ingestion/pipeline.js";
 
-const worker = new Worker('file-upload-queue', async job => {
+const worker = new Worker(
+    "file-upload-queue",
+    async (job) => {
+        if (!job) return;
 
-    if (job) {
-        const data = JSON.parse(job.data);
-        // PDF Loader initialize
-        const loader = new PDFLoader(data.path);
-
-        // Initializing text-splitter
-        const splitter = new RecursiveCharacterTextSplitter({
-            chunkSize: 250,
-            chunkOverlap: 10,
-        });
-
-        // Initializing Vector DB (Pinecone)
-        const pinecone = new Pinecone({
-            apiKey: process.env.PINECONE_API_KEY
-        });
-        const pineconeIndex = pinecone.index(process.env.PINECONE_INDEX);
-
-        // Initializing OpenAI Embeddings
-        // const embeddings = new OpenAIEmbeddings({
-        //     model: "text-embedding-3-small",
-        //     apiKey: process.env.OPENAI_API_KEY
-        // });
-
-        // Initializing Hugging Face Embeddings
-        const embeddings = new HuggingFaceInferenceEmbeddings({
-            apiKey: process.env.HUGGINGFACEHUB_API_KEY,
-            model: "sentence-transformers/all-mpnet-base-v2", // Defaults to `BAAI/bge-base-en-v1.5` if not provided
-            provider: "hf-inference", // Falls back to auto selection mechanism within Hugging Face's inference API if not provided
-        });
-
+        console.log("Worker received job:", job.id, job.data);
         try {
-            const docs = await loader.load();
-            const texts = await splitter.splitDocuments(docs);
-            const vectorStore = await PineconeStore.fromExistingIndex(embeddings, {
-                pineconeIndex,
-                // Maximum number of batch requests to allow at once. Each batch is 1000 vectors.
-                maxConcurrency: 5,
-                // You can pass a namespace here too
-                // namespace: "foo",
+            const data = JSON.parse(job?.data);
+            const documentType = detectDocumentType({
+                type: data?.type ?? '',
+                filename: data?.fileName ?? '',
             });
-            await vectorStore.addDocuments(texts);
-            console.log(`Split blog post into ${texts.length} sub-documents.`, texts);
+            // Execute ingestion pipeline
+            
+            const response = await processDocumentIngestion({
+                type: documentType,
+                source: data?.path,
+                metadata: {
+                    userId: data?.userId ?? '',
+                    docId: data?.docId ?? '',
+                    source: data?.filename ?? '',
+                },
+            });
+            const { totalDocuments, totalChunks, docId } = response;
+            console.log(`Job ${job.id} completed successfully
+                \nTotal Documents: ${totalDocuments}
+                \nTotal Chuncks: ${totalChunks}
+                \nDocument Id: ${docId}`);
         } catch (err) {
-            console.log(err);
+            console.error(`Job ${job.id} failed`, err);
+            // IMPORTANT: rethrow so BullMQ can retry / mark failed
+            throw err;
         }
+    },
+    {
+        concurrency: 5,
+        connection: {
+            host: "localhost",
+            port: 6379,
+        },
     }
-}, {
-    concurrency: 5,
-    connection: {
-        host: 'localhost',
-        port: 6379
-    }
-});
+);
 
-console.log("Worker started")
+console.log("Worker started and listening to file-upload-queue");
