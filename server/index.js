@@ -3,7 +3,9 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import { Queue } from 'bullmq';
+import crypto from "crypto";
 import clerkClient, { ClerkExpressRequireAuth } from '@clerk/clerk-sdk-node';
+import { detectDocumentType } from "../server/utils/detectDocumentType.js";
 
 const app = express();
 app.use(cors());
@@ -31,12 +33,23 @@ app.get('/', ClerkExpressRequireAuth(), async (req, res) => {
     })
 });
 
-app.post('/upload/pdf', ClerkExpressRequireAuth(), upload.single('pdf'), async (req, res) => {
-    await queue.add('file-ready', JSON.stringify({
+app.post('/upload', ClerkExpressRequireAuth(), upload.single('pdf'), async (req, res) => {
+    const userId = req?.auth?.userId ?? '';
+    const fileId = crypto.randomUUID();
+    const type = detectDocumentType({
+        mimetype: req.file.mimetype,
+        filename: req.file.originalname,
+    });
+
+    await queue.add('file-upload-queue', {
         fileName: req.file.originalname,
-        destination: req.file.destination,
-        path: req.file.path
-    }));
+        path: req.file.path,
+        userId: userId,
+        docId: crypto.randomUUID(),
+        mimetype: req.file.mimetype,
+        type,
+        fileId,
+    });
     return res.json({ message: "Uploaded Successfully" })
 });
 

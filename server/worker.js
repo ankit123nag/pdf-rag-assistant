@@ -10,11 +10,13 @@ const worker = new Worker(
 
         console.log("Worker received job:", job.id, job.data);
         try {
-            const data = JSON.parse(job?.data);
+            const data = job?.data;
             const documentType = detectDocumentType({
-                type: data?.type ?? '',
-                filename: data?.fileName ?? '',
+                type: data?.type,
+                mimetype: data?.mimetype,
+                filename: data?.fileName,
             });
+
             // Execute ingestion pipeline
             
             const response = await processDocumentIngestion({
@@ -23,7 +25,7 @@ const worker = new Worker(
                 metadata: {
                     userId: data?.userId ?? '',
                     docId: data?.docId ?? '',
-                    source: data?.filename ?? '',
+                    source: data?.fileName ?? '',
                 },
             });
             const { totalDocuments, totalChunks, docId } = response;
