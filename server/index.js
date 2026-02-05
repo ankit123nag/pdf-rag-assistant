@@ -5,7 +5,7 @@ import multer from 'multer';
 import { Queue } from 'bullmq';
 import crypto from "crypto";
 import clerkClient, { ClerkExpressRequireAuth } from '@clerk/clerk-sdk-node';
-import { detectDocumentType } from "../server/utils/detectDocumentType.js";
+import { detectDocumentType } from "../server/utils/detectDocumentType.util.js";
 
 const app = express();
 app.use(cors());

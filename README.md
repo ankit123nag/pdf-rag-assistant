@@ -8,10 +8,11 @@ The document ingestion pipeline is fully implemented and operational; query and 
 ## 🚀 Key Features
 - User authentication via Clerk
 - Secure document upload
-- Asynchronous ingestion using a queue + background worker
+- Asynchronous ingestion using a queue + background worker with batch-level logging and retry-safe vector indexing
 - Multi-format document support (PDF, HTML, DOCX, TXT)
 - Robust document cleaning & normalization
 - Exact and near-duplicate content detection
+- Idempotent ingestion (duplicate uploads are automatically skipped)
 - Deterministic chunking
 - Vector embeddings generation
 - Vector storage in Pinecone
@@ -28,13 +29,23 @@ Raw Document
  → Boilerplate Removal
  → Text Normalization
  → Exact & Near-Deduplication
- → Chunking
+ → Chunking (deterministic)
  → Metadata Enrichment
- → Quality Validation
- → Embeddings
- → Vector Indexing
+ → Quality Validation (guardrails + skip semantics)
+ → Embeddings (LangChain-managed batching)
+ → Batched Vector Indexing (retry-safe, observable)
 ```
-This ensures high-quality, deduplicated, and retrieval-ready data.
+This ensures high-quality, deduplicated, and retrieval-ready data while preventing runaway cost.
+
+## 🛡 Ingestion Guardrails & Cost Control
+- The ingestion system enforces explicit safeguards to ensure predictable behavior:
+- Hard chunk limits to prevent runaway documents
+- Low-information chunk filtering
+- Skip semantics for invalid documents (non-retryable)
+- Idempotent ingestion using content fingerprints (Redis-backed)
+- Batched Pinecone indexing with isolated retries
+- Namespace isolation to prevent cross-user data leakage
+Invalid documents are intentionally skipped, not failed.
 
 ## 🏗 Architecture Overview
 ```text
@@ -42,19 +53,23 @@ Next.js (Frontend UI)
         ↓
 Express API (Auth, Upload, Queue)
         ↓
-Valkey / Redis Queue
+Valkey / Redis (persistent)
+  ├─ BullMQ (job queue)
+  ├─ Fingerprint store (idempotent ingestion)
+  └─ Shared Redis client (single connection)
         ↓
 Background Worker
         ├─ Extraction (PDF / HTML / DOCX / TXT)
         ├─ Cleaning & Normalization
         ├─ Deduplication
         ├─ Chunking
+        ├─ Validation
         ├─ Embeddings
         └─ Pinecone Indexing
 ```
 - Authentication is enforced at the API boundary
 - All heavy processing is offloaded to background workers
-- Workers are retry-safe and fail fast on invalid data
+- Workers are concurrency-limited and retry-safe
 
 ## Tech Stack
 ### Frontend
@@ -82,22 +97,25 @@ Background Worker
 ```bash
 pdf_rag_assistant
 ├── server
-│   ├── index.js                # API server
-│   ├── worker.js               # Background worker
+│   ├── index.js                 # API server
+│   ├── worker.js                # Background worker
 │   ├── ingestion/
-│   │   ├── extract/            # PDF, HTML, DOCX, TXT extractors
-│   │   ├── clean/              # Boilerplate + normalization
-│   │   ├── dedupe/             # Exact & near-duplicate detection
-│   │   ├── chunk/              # Deterministic chunking
-│   │   ├── enrich/             # Metadata attachment
-│   │   ├── validate/           # Quality checks
-│   │   ├── embed/              # Embeddings
-│   │   ├── index/              # Pinecone indexing
-│   │   └── pipeline.js         # Canonical ingestion pipeline
-│   ├── utils/
-│   │   └── detectDocumentType.js
+│   │   ├── extract/             # PDF, HTML, DOCX, TXT extractors
+│   │   ├── clean/               # Boilerplate + normalization
+│   │   ├── dedupe/              # Exact & near-duplicate detection
+│   │   ├── chunk/               # Deterministic chunking
+│   │   ├── enrich/              # Metadata attachment
+│   │   ├── validate/            # Quality checks & guardrails
+│   │   ├── embed/               # Embeddings
+│   │   ├── index/               # Pinecone indexing
+│   │   └── pipeline.js          # Canonical ingestion pipeline
+│   ├── utils/                   # Shared utilities
+│   │   ├── batch.util.js        # Network-bound batching
+│   │   ├── retry.util.js        # Isolated retry logic
+│   │   ├── fingerprint.util.js  # Content fingerprinting
+│   │   └── fingerprint.store.js # Redis-backed idempotency
 │   └── config/
-├── client/web                  # Next.js app
+├── client/web                   # Next.js app
 ├── scripts
 ├── docker-compose.yml
 
@@ -110,6 +128,19 @@ pdf_rag_assistant
 
 ### Environment Variables
 Create environment files using the provided .env.example templates in the respective client and server directories.
+A single Redis connection is shared by BullMQ and all ingestion utilities (batch retries, fingerprint storage, idempotency).
+
+## Redis / Valkey Persistence
+Redis / Valkey is used not only for job queueing (BullMQ) but also for
+persistent ingestion state such as document fingerprints.
+
+To ensure idempotent ingestion across restarts, Redis persistence **must be enabled**. The system relies on Redis retaining keys between container or process restarts.
+
+Persistence is typically enabled via:
+- RDB snapshots (recommended)
+- or AOF (append-only file)
+
+When running via Docker, a volume must be mounted to persist data.
 
 ## Running the Application
 From the project root, run:
@@ -126,10 +157,11 @@ This will:
 
 ## 🔄 Background Worker Design
 - Workers consume jobs from the file-upload-queue
-- Concurrency is managed by BullMQ
+- Concurrency is intentionally limited
 - Files are read using absolute, normalized paths
 - PDF extraction uses buffer-based loading for cross-platform safety
-- Failures propagate correctly for retries
+- Batch-level retries occur only where failures happen
+- Invalid documents are skipped, not retried
 
 ## 📌 Current Project Status
 | Feature                       | Status             |
@@ -148,7 +180,18 @@ This will:
 - Clear separation of concerns (API, worker, pipeline)
 - Deterministic and retry-safe ingestion
 - Infrastructure decoupled from business logic
+- Idempotency relies on persistent state; infrastructure durability is treated as a correctness requirement, not an optimization
+- Prefer no ingestion over incorrect ingestion
 - Built as a scalable foundation for future RAG capabilities
+- A single shared Redis client is used to enforce consistency and prevent connection sprawl
+
+## Batching & Retry Strategy
+- Batching is applied only at network boundaries
+- Embeddings are batched internally by LangChain
+- Pinecone indexing is explicitly batched at the application level
+- Each batch is logged with start / success / failure states
+- Retries occur only at the failing batch, not the entire document
+- Failures propagate cleanly for queue-level retries
 
 ## 🔮 Planned Enhancements
 - User query & prompt processing
@@ -158,4 +201,6 @@ This will:
 - Evaluation & feedback loop
 
 ## 📎 Summary
-This project serves as a robust foundation for a RAG system, focusing first on ingestion quality and system correctness before adding query and generation layers.
+This project provides a production-ready ingestion foundation for a RAG system.
+
+The pipeline is idempotent, cost-aware, retry-safe, and designed to be safely run multiple times without duplicating data or incurring unbounded embedding costs.

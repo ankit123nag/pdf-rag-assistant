@@ -1,6 +1,13 @@
 services:
-    valkey:
-        image: valkey/valkey
-        ports:
-          - 6379:6379
-        restart: unless-stopped
+  valkey:
+    image: valkey/valkey
+    command: >
+      valkey-server --save 60 1 --appendonly no
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey-data:/data
+    restart: unless-stopped
+
+volumes:
+  valkey-data:
